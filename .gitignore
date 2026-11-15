@@ -1,0 +1,36 @@
+# Build output
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+*.o
+*.so
+*.a
+*.lib
+*.exe
+
+# Generated at run time
+data/cache/
+*.spv
+mayaflux_run.txt
+
+# Renders
+*.wav
+*.raw
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Private notes
+HANDOFF.md
