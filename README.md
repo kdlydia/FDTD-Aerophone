@@ -18,7 +18,8 @@ The Python reference and the FPGA design will go in `python/` and `fpga/`.
 
 ## Building the instrument
 
-Needs the MayaFlux 1.0.0-dev nightly from 15 Nov 2026 or later, CMake 3.31+,
+Needs the MayaFlux 1.0.0-dev nightly from 16 Nov 2026 or later (for
+`DuctNetwork`), CMake 3.31+,
 Ninja and a Vulkan driver. Tested on Arch.
 
 ```sh
@@ -28,11 +29,13 @@ cmake --build build
 ./build/aerophone
 ```
 
-The faders set blowing pressure, reed closing pressure, bore length and gain.
-Ctrl-C quits.
+The sound comes from MayaFlux's `DuctNetwork`. The faders set blowing
+pressure, reed closing pressure, bore length, breath noise, lip and gain. Two
+plots show the pressure along the bore and the level of the first eight
+harmonics. Ctrl-C quits.
 
-The model itself, `mayaflux/src/ReedTube.hpp`, doesn't depend on MayaFlux. To
-render a WAV without it:
+Our own version of the model, `mayaflux/src/ReedTube.hpp`, doesn't depend on
+MayaFlux and is kept as the reference. To render a WAV with it:
 
 ```sh
 cd mayaflux && mkdir -p build

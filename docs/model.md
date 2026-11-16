@@ -86,5 +86,5 @@ MayaFlux now has a `DuctNetwork` that runs the same kind of scheme inside the
 engine ([MayaFlux#187](https://github.com/MayaFlux/MayaFlux/issues/187)). It
 adds wall losses, arbitrary bore profiles (cones), a second-order radiation
 load and an optional reed with its own dynamics. It plays 141.7 Hz at 0.6 m
-with losses. The instrument will move onto it once it's in a nightly.
+with losses. The instrument runs on it since the 16 Nov nightly.
 `ReedTube.hpp` stays as the reference.

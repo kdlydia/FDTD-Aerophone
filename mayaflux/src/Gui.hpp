@@ -128,7 +128,7 @@ public:
     std::function<void(const std::string&)> text(const std::string& initial, glm::vec4 color = { 0.85F, 0.85F, 0.85F, 1.F })
     {
         const auto bounds = m_cursor.advance(m_row);
-        const Portal::Text::PressParams params { .color = color, .render_bounds = { 640, 48 } };
+        const Portal::Text::PressParams params { .color = color, .render_bounds = text_pixels(bounds) };
 
         auto el = F::Element {}
                       .non_interactive()
@@ -213,6 +213,77 @@ public:
         });
         tend->place(*m_surface).bridge().bind(std::move(read));
         keep_alive().push_back(tend);
+    }
+
+    /**
+     * A bar graph @p rows tall of @p count bars, a Forma plot. @p fill writes
+     * the values into a vector of that size on the graphics thread every
+     * frame. Bars grow from the middle and reach the edge at +-1. @p grid is
+     * the number of vertical and horizontal grid lines, edges included.
+     */
+    void bars(const std::string& name, float rows, uint64_t count,
+        std::function<void(std::vector<double>&)> fill, glm::uvec2 grid, glm::vec3 color = { 0.95F, 0.55F, 0.3F })
+    {
+        (void)text(name);
+        const auto bounds = m_cursor.advance(m_row * rows);
+        (void)m_cursor.advance(m_row * 0.3F);
+
+        plot_area(bounds, grid);
+
+        auto container = P::source().as(name, count, Role::SPATIAL_Y, Modality::SCALAR_F32).from(std::move(fill)).build();
+        auto spec = P::series().y(Role::SPATIAL_Y, P::AxisRange {}.range(-1.F, 1.F), { color }).bounds(bounds).as_bars().done();
+        auto plot = std::make_shared<F::Mapped<std::shared_ptr<Kakshya::PlotContainer>>>(
+            P::place(*m_surface, F::slice(*m_surface, spec.topology), spec, std::move(container)));
+
+        // place() draws once. A plot redraws when it is synced.
+        schedule_metro(1.0 / k_display_rate, [plot] { plot->sync(); }, name + " bars", k_frame);
+        keep_alive().push_back(plot);
+    }
+
+    /**
+     * A plot @p rows tall of overlapping lines, one per entry of @p names, each
+     * the last @p seconds of one value, under a legend in the lines' colours.
+     * @p read runs on the graphics thread every frame and returns one value
+     * per line, drawn against @p range. @p grid is the number of vertical and
+     * horizontal grid lines, edges included.
+     */
+    void lines(const std::string& name, float rows, const std::vector<std::string>& names, P::AxisRange range, double seconds,
+        std::function<std::vector<double>()> read, const std::vector<glm::vec3>& colors, glm::uvec2 grid)
+    {
+        (void)text(name);
+        const auto key = m_cursor.advance(m_row);
+        const auto bounds = m_cursor.advance(m_row * rows);
+        (void)m_cursor.advance(m_row * 0.3F);
+
+        plot_area(bounds, grid);
+
+        // One plot per line. A waveform of several series joins the end of one
+        // to the start of the next with a segment that still shows.
+        using Plotted = F::Mapped<std::shared_ptr<Kakshya::PlotContainer>>;
+        std::vector<std::shared_ptr<History>> histories;
+        std::vector<std::shared_ptr<Plotted>> plots;
+        const float cell = key.width() / static_cast<float>(names.size());
+        for (size_t i = 0; i < names.size(); ++i) {
+            const glm::vec3 color = colors[i % colors.size()];
+            auto history = std::make_shared<History>(seconds, range.min);
+            auto container = P::source().as(names[i], history->size(), Role::SPATIAL_Y, Modality::SCALAR_F32).from(rolling(history)).build();
+            auto spec = P::series().y(Role::SPATIAL_Y, range, { color }).bounds(bounds).as_waveform().done();
+            auto plot = std::make_shared<Plotted>(P::place(*m_surface, F::slice(*m_surface, spec.topology), spec, std::move(container)));
+            histories.push_back(history);
+            plots.push_back(plot);
+            keep_alive().push_back(plot);
+
+            const float x = key.min.x + cell * static_cast<float>(i);
+            label(names[i], { .min = { x, key.min.y }, .max = { x + cell, key.max.y } }, glm::vec4(color, 1.F));
+        }
+
+        schedule_metro(1.0 / k_display_rate, [plots, histories, read = std::move(read)] {
+            const auto values = read();
+            for (size_t i = 0; i < std::min(values.size(), histories.size()); ++i)
+                histories[i]->push(values[i]);
+            for (const auto& plot : plots)
+                plot->sync();
+        }, name + " lines", k_frame);
     }
 
     /**
@@ -341,6 +412,35 @@ public:
     }
 
 private:
+    /// Texture size for text in @p bounds: 48 pixels tall and the bounds' shape, so glyphs keep their proportions.
+    [[nodiscard]] glm::uvec2 text_pixels(Kinesis::AABB2D bounds) const
+    {
+        const float aspect = bounds.width() * static_cast<float>(m_width) / (bounds.height() * static_cast<float>(m_height));
+        return { static_cast<uint32_t>(48.F * aspect), 48 };
+    }
+
+    /// A plot's background and grid. The surface's shared buffer draws in the
+    /// order things are placed, so placing these before the data puts them behind it.
+    void plot_area(Kinesis::AABB2D bounds, glm::uvec2 grid)
+    {
+        (void)P::place_rect(*m_surface, F::slice(*m_surface, Portal::Graphics::PrimitiveTopology::TRIANGLE_STRIP),
+            { .bounds = bounds, .color = glm::vec3(0.1F, 0.1F, 0.12F) });
+
+        auto target = F::slice(*m_surface, Portal::Graphics::PrimitiveTopology::LINE_LIST);
+        target.submit(P::plot_grid(bounds, grid.x, grid.y, glm::vec3(0.25F)));
+        (void)m_surface->layer().add(F::Element {}.with_bounds(bounds).with_buffer(target).non_interactive());
+    }
+
+    /// A fixed piece of text in @p region.
+    void label(const std::string& s, Kinesis::AABB2D region, glm::vec4 color)
+    {
+        const Portal::Text::PressParams params { .color = color, .render_bounds = text_pixels(region) };
+        (void)m_surface->layer().add(F::Element {}
+                .non_interactive()
+                .with_buffer(F::FormaTarget::slice_of(m_text, Portal::Graphics::PrimitiveTopology::TRIANGLE_LIST))
+                .with_text(s, params, region));
+    }
+
     float m_row { 0.11F };
     uint32_t m_height { 520 };
     uint32_t m_width { 420 };
