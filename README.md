@@ -34,6 +34,10 @@ pressure, reed closing pressure, bore length, breath noise, lip and gain. Two
 plots show the pressure along the bore and the level of the first eight
 harmonics. Ctrl-C quits.
 
+No MayaFlux? [docs/demo.mp4](docs/demo.mp4) is 30 s of it playing while the
+faders move: blowing up and down, bore length 0.6 to 0.3 to 1.0 m, lip, reed
+closing pressure, then breath noise.
+
 Our own version of the model, `mayaflux/src/ReedTube.hpp`, doesn't depend on
 MayaFlux and is kept as the reference. To render a WAV with it:
 
