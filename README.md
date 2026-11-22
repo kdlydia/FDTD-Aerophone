@@ -10,7 +10,7 @@ gets too large, and the open end radiates. Details in
 
 ## Layout
 
-- `mayaflux/`: the model in C++ and a playable instrument built on
+- `mayaflux/`: the playable instrument, built on the `DuctNetwork` of
   [MayaFlux](https://github.com/MayaFlux/MayaFlux)
 - `docs/`: notes on the model, references
 
@@ -40,15 +40,6 @@ closing pressure, then breath noise.
 [docs/walkthrough.mp4](docs/walkthrough.mp4) is a minute long and moves one
 fader at a time, with captions giving the pitch and harmonic levels measured
 from the recording.
-
-Our own version of the model, `mayaflux/src/ReedTube.hpp`, doesn't depend on
-MayaFlux and is kept as the reference. To render a WAV with it:
-
-```sh
-cd mayaflux && mkdir -p build
-g++ -std=c++23 -O2 -I src tools/render_reed.cpp -o build/render_reed
-./build/render_reed 2 1500 build/reed.wav   # seconds, mouth pressure in Pa, output file
-```
 
 ## License
 

@@ -66,7 +66,7 @@ void settings()
 namespace {
 
 // Starting values. ReedOperator's default reed (12 mm wide, 0.4 mm open) is
-// sized for this bore, the same reed ReedTube.hpp uses.
+// sized for this bore.
 constexpr double k_length = 0.6; ///< m
 constexpr double k_longest = 1.2; ///< Top of the length fader, m
 constexpr double k_radius = 0.0075; ///< m
