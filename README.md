@@ -37,6 +37,9 @@ harmonics. Ctrl-C quits.
 No MayaFlux? [docs/demo.mp4](docs/demo.mp4) is 30 s of it playing while the
 faders move: blowing up and down, bore length 0.6 to 0.3 to 1.0 m, lip, reed
 closing pressure, then breath noise.
+[docs/walkthrough.mp4](docs/walkthrough.mp4) is a minute long and moves one
+fader at a time, with captions giving the pitch and harmonic levels measured
+from the recording.
 
 Our own version of the model, `mayaflux/src/ReedTube.hpp`, doesn't depend on
 MayaFlux and is kept as the reference. To render a WAV with it:
