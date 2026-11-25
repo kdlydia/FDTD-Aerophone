@@ -90,6 +90,37 @@ add energy.
 
 Radiated pressure at 1 m, ρ/(4π) · dU_end/dt, in Pa, times the gain fader.
 
+## Multiphonic
+
+One `DuctNetwork` doesn't make a multiphonic on its own. In an offline sweep
+with a conical bore (end radius up to 4 times the mouth's) and blowing from 0.45
+to 1.15 p_M, the reed always settled on one resonance and jumped cleanly from
+one to the other as the blowing changed.
+
+So the Multiphonic window puts pieces together instead. A second
+`DuctNetwork`, with its own reed and the same breath, is tuned to an interval
+r times the first's pitch:
+
+    L2 = (L + 0.6133a) / r - 0.6133a
+
+Both run as `AUDIO_COMPUTE` networks and are heard through one buffer per
+channel. The buffer plays the first bore, a `NetworkAudioProcessor` mixes in
+the second at the strength fader, and a `PolynomialProcessor` runs Kinesis's
+`chebyshev_series` on the sum with weights, for strength s,
+
+    T0: s,   T1: 1 + 1.8s,   T2: s,   T3: 0.6s
+
+so the output is x + 2s x² + 2.4s x³. The x² term gives the two bores' sum and
+difference tones, and x³ gives tones like 2f1 − f2. The raised T1 and the T0
+term keep the plain signal at unit gain with no offset at rest.
+
+This imitates a multiphonic. In a real one a single reed locks onto two
+resonances at once; here each bore has its own reed and they only meet in
+the mix.
+
+The burst button raises the blowing by 0.35 (at most 0.98 p_M) for 150 ms on
+both bores.
+
 ## Defaults
 
 | | |
@@ -142,5 +173,8 @@ shows each of these.
    solve has one solution there, so it isn't the solver picking another root.
    We don't know yet whether it's physical or comes from the grid.
 2. The older model had a 750 Hz tone when blowing above p_M and an f0/2
-   component at 0.2 m with p_M = 6000 Pa. Neither has been rechecked on
-   `DuctNetwork`.
+   component at 0.2 m with p_M = 6000 Pa. The f0/2 hasn't been rechecked on
+   `DuctNetwork`. Above p_M the cone sweep went silent, with no tone.
+3. One short recording with the multiphonic at strength 0.6 had the left and
+   right channels differing. At strength 0 they are identical. Not looked
+   into yet.

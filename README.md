@@ -34,6 +34,11 @@ pressure, reed closing pressure, bore length, breath noise, lip and gain. Two
 plots show the pressure along the bore and the level of the first eight
 harmonics. Ctrl-C quits.
 
+A second window, Multiphonic, adds a second bore at an interval to the first,
+blown the same way and mixed in with their sum and difference tones. It has a
+dial for the interval, a strength fader and a burst button (a short puff of
+breath). Both windows have a mute in the bottom right.
+
 No MayaFlux? [docs/demo.mp4](docs/demo.mp4) is 30 s of it playing while the
 faders move: blowing up and down, bore length 0.6 to 0.3 to 1.0 m, lip, reed
 closing pressure, then breath noise.

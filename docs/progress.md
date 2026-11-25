@@ -12,6 +12,11 @@ gain), a level meter, the pressure along the bore and the levels of the
 first eight harmonics. The whole app, audio and graphics, uses about 12% of
 one core on an i7-1185G7 laptop.
 
+A second window makes multiphonics: a second bore at an interval to the first
+(a dial from 1.25 to 2.9 times its pitch), blown the same way, mixed in and
+shaped into sum and difference tones. It also has a burst button, and both
+windows have a mute. See [model.md](model.md).
+
 [model.md](model.md) has the scheme. [demo.mp4](demo.mp4) and
 [walkthrough.mp4](walkthrough.mp4) show it playing.
 
@@ -39,7 +44,7 @@ MayaFlux nightly and gave the same numbers. The others are from 22 Nov.
 | fixed-point SystemVerilog on the XC7A100T | not started |
 | CPU/GPU/FPGA benchmarks | not started |
 | playable controls | done as on-screen faders; no MIDI yet |
-| multiphonics (stretch) | not started |
+| multiphonics (stretch) | a first version: two bores mixed and shaped, see model.md |
 
 ## Proposed next
 
