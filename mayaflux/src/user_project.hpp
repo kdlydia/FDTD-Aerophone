@@ -75,11 +75,33 @@ constexpr double k_blowing = 0.6; ///< p_mouth / p_M. With wall losses it starts
 constexpr double k_gain = 0.3; ///< The output is in Pa at 1 m and peaks near 1.4 Pa.
 constexpr double k_sound_speed = 343.0; ///< DuctSpec's default, m/s
 constexpr size_t k_harmonics = 8;
+constexpr double k_interval = 2.37; ///< Second bore's pitch over the first's, between the in-tune 2 and 5/2
+constexpr double k_interval_lo = 1.25; ///< Dial range
+constexpr double k_interval_hi = 2.9;
 
 /// Quarter-wave pitch of the bore with its end correction, Hz.
 double expected_f0(double length)
 {
     return k_sound_speed / (4.0 * (length + 0.6133 * k_radius));
+}
+
+/// Length of a bore of the same radius that plays @p interval times the pitch of one @p length long.
+double second_length(double length, double interval)
+{
+    const double end = 0.6133 * k_radius;
+    return (length + end) / interval - end;
+}
+
+/**
+ * Chebyshev weights for the multiphonic at @p strength in [0, 1]. T2 and T3 of
+ * the two bores' sum give their sum and difference tones. T1 is raised to keep
+ * the plain signal at unit gain, and T0 cancels T2's offset at rest.
+ */
+std::vector<double> multiphonic_shape(double strength)
+{
+    const double t2 = 1.0 * strength;
+    const double t3 = 0.6 * strength;
+    return { t2, 1.0 + 3.0 * t3, t2, t3 };
 }
 
 /// The output samples, from the audio thread (one writer) to the graphics thread (one reader).
@@ -88,8 +110,12 @@ using Samples = Memory::RingBuffer<double, Memory::FixedStorage<double, 16384>, 
 /// What later steps (visuals, input) reach. Never destroyed, for the reason given at Gui::keep_alive().
 struct Instrument {
     std::shared_ptr<DuctNetwork> duct;
+    std::shared_ptr<DuctNetwork> second; ///< The multiphonic's second bore, blown the same way
+    std::vector<std::shared_ptr<Buffers::NetworkAudioProcessor>> blends; ///< Mix the second bore in, one per channel
+    std::vector<std::shared_ptr<Nodes::Generator::Polynomial>> shapes; ///< Sum and difference tones, one per channel
     std::shared_ptr<Samples> output;
     std::shared_ptr<Examples::Gui::Panel> panel;
+    std::shared_ptr<Examples::Gui::Panel> multiphonic;
 };
 
 /**
@@ -162,6 +188,9 @@ struct Played {
     double blowing { k_blowing };
     double closing_pressure { k_closing_pressure };
     double length { k_length };
+    double interval { k_interval };
+    double gain { k_gain };
+    bool muted { false };
 };
 
 /// One fader: its label, unit, range, start value, and what it sets.
@@ -188,7 +217,14 @@ void build_controls(double sample_rate)
     inst.panel = std::make_shared<Examples::Gui::Panel>("Reed tube", Examples::Gui::k_panel_at, 940, 0.06F, 860);
     auto& panel = *inst.panel;
     auto duct = inst.duct;
+    auto second = inst.second;
     auto played = std::make_shared<Played>();
+
+    // Both bores get the same breath, reed and gain.
+    auto both = [duct, second](const DuctNetwork::Controls& c) {
+        duct->set(c);
+        second->set(c);
+    };
 
     auto status = panel.text("");
     auto describe = [played, status, sample_rate] {
@@ -232,35 +268,89 @@ void build_controls(double sample_rate)
         { 6, 10 });
     panel.gap();
 
+    // The multiphonic's own window: the interval between the bores and how strong it is.
+    inst.multiphonic = std::make_shared<Examples::Gui::Panel>("Multiphonic", Examples::Gui::k_plot_at, 560, 0.09F, 420);
+    auto& mp = *inst.multiphonic;
+    auto second_status = mp.text("");
+    auto retune = [second, played, second_status] {
+        const double l2 = second_length(played->length, played->interval);
+        if (second->set_length(l2))
+            second_status(std::format("second bore {:.3f} m, {:.1f} Hz", l2, expected_f0(l2)));
+    };
+
     const std::vector<Fader> faders {
         { "blowing (p_mouth / p_M)", "", 0.0, 1.2, k_blowing, false,
-            [duct, played](double v) {
+            [both, played](double v) {
                 played->blowing = v;
-                duct->set({ .pressure = v * played->closing_pressure });
+                both({ .pressure = v * played->closing_pressure });
             } },
         { "reed closing pressure p_M", "Pa", 1000.0, 8000.0, k_closing_pressure, true,
-            [duct, played](double v) {
+            [both, played](double v) {
                 played->closing_pressure = v;
-                duct->set({ .pressure = played->blowing * v, .closing_pressure = v });
+                both({ .pressure = played->blowing * v, .closing_pressure = v });
             } },
         { "bore length", "m", 0.15, k_longest, k_length, true,
-            [duct, played, describe](double v) {
+            [duct, played, describe, retune](double v) {
                 if (!duct->set_length(v))
                     return;
                 played->length = v;
                 describe();
+                retune();
             } },
         { "breath noise", "", 0.0, 0.3, 0.0, false,
-            [duct](double v) { duct->set({ .noise = v }); } },
+            [both](double v) { both({ .noise = v }); } },
         { "lip", "", 0.0, 1.0, 0.0, false,
-            [duct](double v) { duct->set({ .lip = v }); } },
+            [both](double v) { both({ .lip = v }); } },
         { "gain", "", 0.0, 1.0, k_gain, false,
-            [duct](double v) { duct->set({ .scale = v }); } },
+            [both, played](double v) {
+                played->gain = v;
+                if (!played->muted)
+                    both({ .scale = v });
+            } },
     };
 
     // Each fader reports once at start, which also fills in the status line.
     for (const auto& f : faders)
         (void)panel.fader(f.name, f.unit, f.lo, f.hi, f.initial, f.set, f.log);
+
+    (void)mp.text("ticks: in tune at 3:2, 2:1 and 5:2");
+    (void)mp.dial("interval (second bore / first)", "", k_interval_lo, k_interval_hi, k_interval, { 1.5, 2.0, 2.5 },
+        [played, retune](double v) {
+            played->interval = v;
+            retune();
+        }, true);
+    (void)mp.fader("strength", "", 0.0, 1.0, 0.0, [blends = inst.blends, shapes = inst.shapes](double v) {
+        for (const auto& b : blends)
+            b->set_mix(static_cast<float>(v));
+        for (const auto& s : shapes)
+            s->set_coefficients(multiphonic_shape(v));
+    });
+
+    // A short puff: blowing up by 0.35 (at most 0.98 p_M) for 150 ms, then back to the fader.
+    auto light = std::make_shared<std::shared_ptr<Portal::Forma::MappedState<bool>>>();
+    auto bursts = std::make_shared<int>(0);
+    *light = mp.button("burst (a short puff of breath)", [both, played, light, bursts] {
+        both({ .pressure = std::min(played->blowing + 0.35, 0.98) * played->closing_pressure });
+        schedule_sequence({ { 0.15, [both, played, light] {
+                                 both({ .pressure = played->blowing * played->closing_pressure });
+                                 (*light)->write(false);
+                             } } },
+            std::format("burst {}", ++*bursts), Vruta::ProcessingToken::FRAME_ACCURATE);
+    });
+
+    // One mute for both windows. Each button shows the shared state.
+    auto mutes = std::make_shared<std::vector<std::shared_ptr<Portal::Forma::MappedState<bool>>>>();
+    const auto on_mute = [both, played, mutes](bool m) {
+        if (played->muted != m) {
+            played->muted = m;
+            both({ .scale = m ? 0.0 : played->gain });
+        }
+        for (const auto& s : *mutes)
+            if (s->value != m)
+                s->write(m);
+    };
+    mutes->push_back(panel.corner_toggle("mute", false, on_mute));
+    mutes->push_back(mp.corner_toggle("mute", false, on_mute));
 }
 
 /**
@@ -270,33 +360,59 @@ void build_controls(double sample_rate)
  * channels, with one control window: blowing, reed closing pressure, bore
  * length, breath noise, lip, gain, a level meter, the pressure along the bore,
  * the level of each harmonic and the expected pitch.
+ *
+ * A second window makes it a multiphonic: a second bore at an interval to the
+ * first, blown the same way, mixed in and shaped into sum and difference tones.
  */
 void compose()
 {
     const auto sample_rate = static_cast<double>(Config::get_sample_rate());
+    const bool stereo = Config::get_num_out_channels() > 1;
 
     auto& inst = instrument();
     inst.duct = vega.DuctNetwork(k_length, k_radius, sample_rate);
-    inst.duct->set({
-        .scale = k_gain,
-        .pressure = k_blowing * k_closing_pressure,
-        .closing_pressure = k_closing_pressure,
-    });
-
-    // One network, processed once per cycle and sent to each channel it is on.
-    if (Config::get_num_out_channels() > 1)
+    inst.second = vega.DuctNetwork(second_length(k_length, k_interval), k_radius, sample_rate);
+    for (const auto& d : { inst.duct, inst.second }) {
+        d->set({
+            .scale = k_gain,
+            .pressure = k_blowing * k_closing_pressure,
+            .closing_pressure = k_closing_pressure,
+        });
+        // Processed once per cycle on the channels they are on, but heard only through the buffers below.
+        d->set_output_mode(Nodes::Network::OutputMode::AUDIO_COMPUTE);
+    }
+    if (stereo) {
         inst.duct = inst.duct | Audio[{ 0, 1 }];
-    else
+        inst.second = inst.second | Audio[{ 0, 1 }];
+    } else {
         inst.duct = inst.duct | Audio[0];
+        inst.second = inst.second | Audio[0];
+    }
 
-    // Each cycle runs channel 0's buffers before the networks, so this takes
-    // the block the duct made in the previous cycle and misses none.
+    // Per channel: the first bore, then the second mixed in at the strength
+    // fader, then a Chebyshev polynomial for the sum and difference tones.
     inst.output = std::make_shared<Samples>();
-    (void)attach_quick_process([duct = inst.duct, output = inst.output](const std::shared_ptr<Buffers::AudioBuffer>&) {
-        if (auto block = duct->get_audio_buffer())
-            for (double v : *block)
-                (void)output->push(v);
-    }, { 0 });
+    for (uint32_t ch = 0; ch < (stereo ? 2U : 1U); ++ch) {
+        auto out = vega.AudioBuffer(ch, Config::get_buffer_size()) | Audio[ch];
+        out->set_default_processor(std::make_shared<Buffers::NetworkAudioProcessor>(inst.duct));
+
+        auto blend = std::make_shared<Buffers::NetworkAudioProcessor>(inst.second, 0.F, false);
+        add_processor(blend, out);
+
+        auto shape = std::make_shared<Nodes::Generator::Polynomial>(
+            Kinesis::Discrete::chebyshev_series, Nodes::Generator::PolynomialMode::FEEDFORWARD, 1, multiphonic_shape(0.0));
+        add_processor(std::make_shared<Buffers::PolynomialProcessor>(shape), out);
+
+        inst.blends.push_back(blend);
+        inst.shapes.push_back(shape);
+
+        // What is heard, for the harmonics plot.
+        if (ch == 0)
+            (void)attach_quick_process([output = inst.output](const std::shared_ptr<Buffers::AudioBuffer>& b) {
+                for (double v : b->get_data())
+                    (void)output->push(v);
+            }, out);
+    }
 
     // compose() runs on the main thread, and WindowManager::create_window adds
     // to the window list without a lock while the graphics thread copies that

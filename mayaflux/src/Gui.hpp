@@ -98,6 +98,51 @@ inline auto rolling(const std::shared_ptr<History>& history)
 }
 
 /**
+ * A knob filling @p region: an arc from 225 to -45 degrees, lit up to the
+ * value, with a pointer and a tick at each of @p marks (fractions of the
+ * travel). Drag around the centre to turn it. @p aspect is the window's
+ * width over its height, so the knob stays round.
+ */
+inline F::Geometry::Form<float> dial_form(Kinesis::AABB2D region, float aspect, std::vector<float> marks,
+    glm::vec3 track = glm::vec3(0.25F), glm::vec3 lit = { 0.3F, 0.7F, 1.F }, glm::vec3 mark = { 0.95F, 0.85F, 0.3F })
+{
+    constexpr float start = 1.25F * std::numbers::pi_v<float>;
+    constexpr float end = -0.25F * std::numbers::pi_v<float>;
+    constexpr int segments = 64;
+    const glm::vec2 c = region.center();
+    const glm::vec2 r { region.height() * 0.5F / aspect, region.height() * 0.5F };
+    const auto at = [c, r](float angle, float k) { return c + k * r * glm::vec2(std::cos(angle), std::sin(angle)); };
+
+    F::GeometryFn<float> fn = [=](float v, std::vector<uint8_t>& out, F::Element& el) {
+        using V = Kakshya::LineVertex;
+        std::vector<V> verts;
+        const auto line = [&verts](glm::vec2 a, glm::vec2 b, glm::vec3 color) {
+            verts.push_back({ .position = { a.x, a.y, 0 }, .color = glm::vec4(color, 1.F) });
+            verts.push_back({ .position = { b.x, b.y, 0 }, .color = glm::vec4(color, 1.F) });
+        };
+        for (int i = 0; i < segments; ++i) {
+            const float t0 = static_cast<float>(i) / segments;
+            const float t1 = static_cast<float>(i + 1) / segments;
+            line(at(start + t0 * (end - start), 1.F), at(start + t1 * (end - start), 1.F), t1 <= v ? lit : track);
+        }
+        for (float m : marks) {
+            const float angle = start + m * (end - start);
+            line(at(angle, 0.8F), at(angle, 1.15F), mark);
+        }
+        line(c, at(start + v * (end - start), 0.9F), lit);
+        F::Geometry::write_verts(out, verts);
+        el.bounds_hint = region;
+    };
+
+    // The angle is taken on screen, so stretch x back by the aspect first.
+    auto angle = Kinesis::angle_fraction(c, start, end);
+    auto project = [c, aspect, angle](glm::vec2 p) { return angle(c + glm::vec2((p.x - c.x) * aspect, p.y - c.y)); };
+
+    return { std::move(fn), Portal::Graphics::PrimitiveTopology::LINE_LIST,
+        2 * (segments + marks.size() + 1) * sizeof(Kakshya::LineVertex), F::Geometry::drag_with<float>(std::move(project)) };
+}
+
+/**
  * A control window: rows of labelled faders and meters, top to bottom.
  */
 class Panel {
@@ -181,6 +226,49 @@ public:
         auto tend = std::make_shared<F::Tend<float>>(F::Tend<float> {
             .form = F::Geometry::horizontal_fader(track, 0.05F, glm::vec3(0.25F), glm::vec3(0.3F, 0.7F, 1.F)),
             .initial = static_cast<float>(std::clamp(t0, 0.0, 1.0)),
+        });
+
+        auto last = std::make_shared<double>(-1.0);
+        tend->place(*m_surface).bridge().write([=](std::span<const float> s) {
+            if (s.empty() || static_cast<double>(s[0]) == *last)
+                return;
+            *last = s[0];
+            const double v = to_value(s[0]);
+            label(std::format("{}  {:.4g} {}", name, v, unit));
+            on_change(v);
+        });
+
+        keep_alive().push_back(tend);
+        return tend->result->state;
+    }
+
+    /**
+     * A labelled dial @p rows tall, from @p lo to @p hi, with a tick at each
+     * value in @p marks. Otherwise the same as fader().
+     */
+    std::shared_ptr<F::MappedState<float>> dial(const std::string& name, const std::string& unit, double lo, double hi, double initial,
+        const std::vector<double>& marks, std::function<void(double)> on_change, bool log = false, float rows = 6.F)
+    {
+        auto label = text(name);
+        const auto row = m_cursor.advance(m_row * rows);
+        (void)m_cursor.advance(m_row * 0.3F);
+
+        const auto to_value = [lo, hi, log](double t) {
+            return log ? lo * std::pow(hi / lo, t) : lo + t * (hi - lo);
+        };
+        const auto to_travel = [lo, hi, log](double v) {
+            return std::clamp(log ? std::log(v / lo) / std::log(hi / lo) : (v - lo) / (hi - lo), 0.0, 1.0);
+        };
+
+        const glm::vec2 half { row.height() * 0.5F / aspect(), row.height() * 0.5F };
+        const Kinesis::AABB2D region { row.center() - half, row.center() + half };
+        std::vector<float> ticks;
+        for (double m : marks)
+            ticks.push_back(static_cast<float>(to_travel(m)));
+
+        auto tend = std::make_shared<F::Tend<float>>(F::Tend<float> {
+            .form = dial_form(region, aspect(), std::move(ticks)),
+            .initial = static_cast<float>(to_travel(initial)),
         });
 
         auto last = std::make_shared<double>(-1.0);
@@ -333,23 +421,46 @@ public:
         const auto row = m_cursor.advance(m_row * 0.7F);
         (void)m_cursor.advance(m_row * 0.3F);
         const Kinesis::AABB2D box { row.min, { row.min.x + 0.18F, row.max.y } };
+        return place_toggle(F::Geometry::toggle(box, glm::vec3(0.25F), glm::vec3(0.95F, 0.45F, 0.3F)), initial, std::move(on_change));
+    }
 
-        auto tend = std::make_shared<F::Tend<bool>>(F::Tend<bool> {
-            .form = F::Geometry::toggle(box, glm::vec3(0.25F), glm::vec3(0.95F, 0.45F, 0.3F)),
-            .initial = initial,
+    /**
+     * A labelled push button. @p on_press runs on the graphics thread at each
+     * press. The button lights when pressed and stays lit until the returned
+     * state is written false; presses while it is lit are ignored.
+     */
+    std::shared_ptr<F::MappedState<bool>> button(const std::string& name, std::function<void()> on_press, glm::vec3 color = { 0.95F, 0.85F, 0.3F })
+    {
+        (void)text(name);
+        const auto row = m_cursor.advance(m_row * 0.9F);
+        (void)m_cursor.advance(m_row * 0.3F);
+        const Kinesis::AABB2D box { row.min, { row.min.x + 0.3F, row.max.y } };
+
+        auto form = F::Geometry::toggle(box, glm::vec3(0.25F), color);
+        form.wire = [](F::Context& ctx, uint32_t id, std::shared_ptr<F::MappedState<bool>> state) {
+            ctx.on_press(id, IO::MouseButtons::Left, [state = std::move(state)](uint32_t, glm::vec2) { state->write(true); });
+        };
+        return place_toggle(std::move(form), false, [on_press = std::move(on_press)](bool on) {
+            if (on)
+                on_press();
         });
+    }
 
-        auto last = std::make_shared<int>(-1);
-        tend->place(*m_surface).bridge().write([on_change = std::move(on_change), last](std::span<const float> s) {
-            const int now = !s.empty() && s[0] > 0.5F ? 1 : 0;
-            if (now == *last)
-                return;
-            *last = now;
-            on_change(now == 1);
-        });
+    /// An on/off box in the window's bottom right corner, @p name to its left. Same contract as toggle().
+    std::shared_ptr<F::MappedState<bool>> corner_toggle(const std::string& name, bool initial, std::function<void(bool)> on_change,
+        glm::vec3 color = { 0.95F, 0.3F, 0.3F })
+    {
+        // Sized in pixels so it looks the same in any window.
+        constexpr glm::vec2 size { 64.F, 30.F };
+        constexpr float margin = 14.F;
+        const glm::vec2 px { 2.F / static_cast<float>(m_width), 2.F / static_cast<float>(m_height) };
+        const glm::vec2 max { 1.F - margin * px.x, -1.F + (margin + size.y) * px.y };
+        const Kinesis::AABB2D box { max - size * px, max };
 
-        keep_alive().push_back(tend);
-        return tend->result->state;
+        const float text_w = 0.6F * size.y * px.x * static_cast<float>(name.size());
+        label(name, { { box.min.x - 8.F * px.x - text_w, box.min.y }, { box.min.x - 8.F * px.x, box.max.y } }, { 0.85F, 0.85F, 0.85F, 1.F });
+
+        return place_toggle(F::Geometry::toggle(box, glm::vec3(0.25F), color), initial, std::move(on_change));
     }
 
     /// A 2D area to drag a point in, over a dark background.
@@ -412,6 +523,24 @@ public:
     }
 
 private:
+    /// Place a bool Form and call @p on_change when its state flips, and once at start.
+    std::shared_ptr<F::MappedState<bool>> place_toggle(F::Geometry::Form<bool> form, bool initial, std::function<void(bool)> on_change)
+    {
+        auto tend = std::make_shared<F::Tend<bool>>(F::Tend<bool> { .form = std::move(form), .initial = initial });
+
+        auto last = std::make_shared<int>(-1);
+        tend->place(*m_surface).bridge().write([on_change = std::move(on_change), last](std::span<const float> s) {
+            const int now = !s.empty() && s[0] > 0.5F ? 1 : 0;
+            if (now == *last)
+                return;
+            *last = now;
+            on_change(now == 1);
+        });
+
+        keep_alive().push_back(tend);
+        return tend->result->state;
+    }
+
     /// Texture size for text in @p bounds: 48 pixels tall and the bounds' shape, so glyphs keep their proportions.
     [[nodiscard]] glm::uvec2 text_pixels(Kinesis::AABB2D bounds) const
     {

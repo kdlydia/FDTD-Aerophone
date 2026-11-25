@@ -122,8 +122,9 @@ shows each of these.
 | 0.6 m | 141.7 Hz | 141.8 Hz |
 | 1.2 m | 71.1 Hz | 71.2 Hz |
 
-- H1, H3, H5 and H7 are within 1 dB of each other. The even harmonics are 37
-  to 50 dB under them, as in a clarinet.
+- At the default settings H1, H3, H5 and H7 are within 1 dB of each other.
+  The even harmonics are much weaker, as in a clarinet: H2 is 37 dB down and
+  H8 27 dB down. At blowing 1.0, H2 falls to about 50 dB down.
 - Below about 0.5 p_M of blowing the note dies. Going from 0.6 to 1.0 adds
   about 2 dB.
 - p_M of 6000 Pa is 3.6 dB louder and 1500 Pa is 4.4 dB quieter, at the same
